@@ -13,7 +13,11 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import stat
+import subprocess
+import sys
+import tempfile
 import urllib.error
 import urllib.request
 
@@ -73,6 +77,54 @@ def base_url() -> str:
         if written:
             return written.rstrip("/")
     return DEFAULT_BASE
+
+
+# ── the sandboxes (E22 Part 2) ───────────────────────────────────────────────
+#
+# One image a language: the same Dockerfiles the marketplace's verifier is
+# built from, kept beside these scripts (and bundled into the frozen helper) so
+# a machine that lacks an image can build it the first time a task needs it.
+
+SANDBOXES = {"python": "assay-verifier:1", "node": "assay-verifier-node:1"}
+
+
+def sandbox_image(sandbox) -> str:
+    """The image a task's tests run in; python when the task says nothing."""
+    return SANDBOXES.get(str(sandbox or "python"), SANDBOXES["python"])
+
+
+def dockerfile_for(sandbox) -> pathlib.Path:
+    here = pathlib.Path(getattr(sys, "_MEIPASS", pathlib.Path(__file__).resolve().parent))
+    folder = here / "sandbox" if (here / "sandbox").is_dir() else here.parent / "sandbox"
+    return folder / f"{'node' if sandbox == 'node' else 'python'}.Dockerfile"
+
+
+def image_present(image: str) -> bool:
+    docker = shutil.which("docker")
+    if not docker:
+        return False
+    return subprocess.run([docker, "image", "inspect", image],
+                          capture_output=True, text=True).returncode == 0
+
+
+def ensure_image(sandbox, log=print) -> bool:
+    """The image for a sandbox, built once from its Dockerfile if the machine
+    lacks it (E22 Part 2, Decision 8). Returns whether it is there."""
+    image = sandbox_image(sandbox)
+    if image_present(image):
+        return True
+    dockerfile = dockerfile_for(sandbox)
+    if not dockerfile.exists() or not shutil.which("docker"):
+        return False
+    log(f"building the {image} image (once; a minute or two)")
+    with tempfile.TemporaryDirectory() as context:
+        shutil.copyfile(dockerfile, pathlib.Path(context) / "Dockerfile")
+        built = subprocess.run([shutil.which("docker"), "build", "-q", "-t", image, context],
+                               capture_output=True, text=True)
+    if built.returncode != 0:
+        log(f"could not build {image}: {(built.stderr or built.stdout).strip()[-300:]}")
+        return False
+    return True
 
 
 # ── http ─────────────────────────────────────────────────────────────────────

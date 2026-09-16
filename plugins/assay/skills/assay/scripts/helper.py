@@ -29,6 +29,7 @@ Every headless session runs in ~/.assay/work, never the person's repository
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -36,7 +37,7 @@ import time
 from datetime import datetime, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from assay import AssayError, as_untrusted, call, load_key  # noqa: E402
+from assay import AssayError, as_untrusted, call, ensure_image, load_key, sandbox_image  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 # Frozen (E20): PyInstaller unpacks the bundle under sys._MEIPASS and the one
@@ -77,7 +78,6 @@ def model_declared() -> str:
     return "codex" if session_runner() == "codex" else "claude-code"
 
 
-SANDBOX_IMAGE = "assay-verifier:1"
 # How many headless sessions an award gets before the loop leaves it alone.
 # The first unattended run (2026-09-09) started a session every pass on an
 # award whose check could not run, five times in eight minutes, each one
@@ -114,19 +114,33 @@ def looks_like_python(public_suite: str) -> bool:
     return ("def test_" in text or "import pytest" in text) and "package main" not in text
 
 
-def can_take(task, public_suite: str) -> str:
+def looks_like_node(public_suite: str) -> bool:
+    """A JavaScript suite: test( or it( at the start of a line (E22 Part 2)."""
+    return bool(re.search(r"(?m)^\s*(?:test|it)\s*\(", public_suite or ""))
+
+
+def can_take(task, public_suite: str, log=print) -> str:
     """Why this helper cannot take the task, in words, or "" when it can (E22).
 
-    The language check applies only to tests that will run. A task where
-    nothing runs — no runner, the buyer judges — is any kind of work: a deck,
-    a document, a page. The owner's first real task was a JavaScript app the
-    old check skipped as "not a Python package", and the ruling was that the
-    language of the work is no business of the marketplace's. A server older
-    than E22 says nothing about `runnable`; that server required a runner on
-    every task, so nothing said means it runs.
+    The language check applies only to tests that will run, and to the
+    sandbox the task names (E22 Part 2): Python tests in the Python box, Node
+    tests in the Node box; the box is built the first time it is needed. A
+    task where nothing runs — no runner, the buyer judges — is any kind of
+    work: a deck, a document, a page. The owner's first real task was a
+    JavaScript app the old check skipped as "not a Python package", and the
+    ruling was that the language of the work is no business of the
+    marketplace's. A server older than E22 says nothing about `runnable`;
+    that server required a runner on every task, so nothing said means it
+    runs.
     """
-    if task.get("runnable", True) and not looks_like_python(public_suite):
-        return "its tests are in a language this helper cannot run yet"
+    if not task.get("runnable", True):
+        return ""
+    sandbox = str(task.get("sandbox") or "python")
+    looks_right = looks_like_node(public_suite) if sandbox == "node" else looks_like_python(public_suite)
+    if not looks_right:
+        return "its tests do not look like " + ("JavaScript" if sandbox == "node" else "Python")
+    if not ensure_image(sandbox, log):
+        return f"this machine lacks the {sandbox_image(sandbox)} image and could not build it"
     return ""
 
 
@@ -149,21 +163,14 @@ def toolchain_ready() -> list:
         missing.append("git (a deck or an image comes back as a git patch)")
     if shutil.which("docker") is None:
         missing.append("docker (work.py check runs the tests in a container)")
-    elif not sandbox_image_present():
-        # Found by the first unattended run: docker was there, the image was
-        # not, and the session — correctly — refused to submit unchecked work,
-        # but only after the award was held. The image is part of "this
-        # machine can run the tests", so it is asked about before any bid.
-        missing.append(f"the {SANDBOX_IMAGE} image (docker build -t {SANDBOX_IMAGE} verifier/)")
+    # The sandbox image is asked about per task now (can_take, E22 Part 2),
+    # and built if the machine lacks it — once, from the Dockerfile bundled
+    # beside these scripts.
     if shutil.which(CLAUDE) is None and shutil.which(CODEX) is None:
         missing.append(f"{CLAUDE} or {CODEX} (the coding session that does the work)")
     return missing
 
 
-def sandbox_image_present() -> bool:
-    probe = subprocess.run([shutil.which("docker") or "docker", "image", "inspect", SANDBOX_IMAGE],
-                           capture_output=True, text=True)
-    return probe.returncode == 0
 
 
 def worth_asking(task, now: datetime, already_bid: set) -> bool:
@@ -525,7 +532,7 @@ def one_pass(now=None, log=print) -> dict:
             continue
         detail = call("GET", f"/v1/tasks/{task['id']}")
         suite = (detail or {}).get("publicSuite") or ""
-        why_not = can_take(task, suite)
+        why_not = can_take(task, suite, log)
         if why_not:
             did["skipped"].append((task["id"], why_not))
             continue

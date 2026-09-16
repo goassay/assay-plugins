@@ -21,7 +21,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from assay import (AssayError, as_untrusted, call, load_key,  # noqa: E402
+from assay import (AssayError, as_untrusted, call, ensure_image, load_key, sandbox_image,  # noqa: E402
                    refuse_out_of_scope)
 
 # Where a task is worked on. NEVER the user's own repository — E9 Decision 3.
@@ -29,7 +29,6 @@ from assay import (AssayError, as_untrusted, call, load_key,  # noqa: E402
 # putting them beside somebody's real source is how a bad day starts.
 WORKSPACES = pathlib.Path.home() / ".assay" / "work"
 
-SANDBOX_IMAGE = "assay-verifier:1"
 
 
 def board():
@@ -101,6 +100,9 @@ def fetch(task_id):
             target.write_text(entry["content"])
 
     (root / "scope.json").write_text(json.dumps(scopes))
+    # E22 Part 2: where the tests run, so `check` picks the same box the
+    # marketplace will.
+    (root / "sandbox.json").write_text(json.dumps(detail.get("sandbox") or "python"))
 
     # A pristine copy, so `submit` can diff against what arrived rather than
     # trusting the working tree to remember.
@@ -135,30 +137,47 @@ def check(task_id):
         print("then submit it.")
         return 0
 
-    print("Running the public tests in a sealed container (no network, read-only)…\n")
-    result = subprocess.run([
-        "docker", "run", "--rm",
-        # E9 Decision 3. These tests were written by whoever published the task.
-        # Running them on the host would be running a stranger's code as the
-        # user, which is the exact thing the marketplace refuses to do to itself.
-        "--network=none", "--read-only", "--user", "nobody",
-        "--cap-drop=ALL", "--security-opt", "no-new-privileges",
-        "--pids-limit", "512", "--memory", "512m", "--memory-swap", "512m",
-        "--cpus", "1.0",
-        "-v", f"{tree.resolve()}:/work:ro",
-        "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-        "-w", "/work", SANDBOX_IMAGE,
-        "sh", "-c", "cd /tmp && python -m pytest -q -p no:cacheprovider "
-                    "--tb=short /work 2>&1",
-    ], capture_output=True, text=True, timeout=600)
+    # E22 Part 2: the same run the marketplace makes — the package's own
+    # run.sh, in the task's own box, writing a JUnit report to /report — rather
+    # than pytest over the tree. A check that runs something other than what
+    # the verifier runs is a check that can pass here and fail there.
+    sandbox_file = WORKSPACES / task_id / "sandbox.json"
+    sandbox = json.loads(sandbox_file.read_text()) if sandbox_file.exists() else "python"
+    if not ensure_image(sandbox, print):
+        raise AssayError(f"This machine lacks the {sandbox_image(sandbox)} image and could not "
+                         "build it. Is Docker running?")
+    print(f"Running run.sh in a sealed container (no network, read-only, {sandbox})…\n")
+    with tempfile.TemporaryDirectory() as report:
+        result = subprocess.run([
+            "docker", "run", "--rm",
+            # E9 Decision 3. These tests were written by whoever published the task.
+            # Running them on the host would be running a stranger's code as the
+            # user, which is the exact thing the marketplace refuses to do to itself.
+            "--network=none", "--read-only", "--user", "nobody",
+            "--cap-drop=ALL", "--security-opt", "no-new-privileges",
+            "--pids-limit", "512", "--memory", "512m", "--memory-swap", "512m",
+            "--cpus", "1.0",
+            "-v", f"{tree.resolve()}:/work:ro",
+            "-v", f"{report}:/report:rw",
+            "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
+            "-w", "/work", sandbox_image(sandbox),
+            "sh", "./run.sh",
+        ], capture_output=True, text=True, timeout=600)
+        junit = pathlib.Path(report) / "junit.xml"
+        wrote_report = junit.exists() and junit.stat().st_size > 0
+        failures = junit.read_text().count("<failure") + junit.read_text().count("<error") if wrote_report else 0
 
     print(result.stdout or result.stderr)
-    if result.returncode == 0:
+    if result.returncode == 0 and wrote_report and failures == 0:
         print("\nPublic tests pass. Remember they are not the ones that decide:")
         print("a hidden suite you cannot see is what the verdict is read from.")
+        return 0
+    if not wrote_report:
+        print("\nThe run wrote no test report to /report, which the marketplace reads the verdict")
+        print("from; check run.sh writes one (pytest --junitxml, node --test-reporter=junit).")
     else:
         print("\nNot yet. Fix and run check again.")
-    return result.returncode
+    return 1
 
 
 def patch_between(pristine: pathlib.Path, tree: pathlib.Path) -> str:
