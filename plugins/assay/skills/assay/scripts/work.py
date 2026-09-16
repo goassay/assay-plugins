@@ -15,6 +15,7 @@ should do the writing. These commands are the plumbing around it.
 """
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -92,7 +93,12 @@ def fetch(task_id):
         if not str(target).startswith(str(tree.resolve())):
             raise AssayError(f"package path escapes the directory: {entry['path']}")
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(entry["content"])
+        if entry.get("encoding") == "base64":
+            # E23: a file that is not text, written as the bytes it is.
+            import base64
+            target.write_bytes(base64.b64decode(entry["content"]))
+        else:
+            target.write_text(entry["content"])
 
     (root / "scope.json").write_text(json.dumps(scopes))
 
@@ -177,13 +183,11 @@ def patch_between(pristine: pathlib.Path, tree: pathlib.Path) -> str:
             old = before[rel].read_text().splitlines(keepends=True) if rel in before else []
             new = after[rel].read_text().splitlines(keepends=True) if rel in after else []
         except UnicodeDecodeError:
-            # E22 admits any kind of work, and "any kind" reaches for a .pptx
-            # or a .png sooner or later. A submission is a text diff; a file
-            # that is not text is refused by name, before the diff crashed on
-            # it, so the session can write the deck as markdown or HTML instead.
-            raise AssayError(f"{rel} is not text. A submission is a text diff, so the work "
-                             "has to be text files — markdown, HTML, source. Write it that "
-                             "way and submit again.")
+            # E23: a file that is not text — a deck, an image — is carried in
+            # git's binary-patch format, which git writes and the marketplace's
+            # `git apply` reads. One such file and the whole patch is git's,
+            # so the headers agree.
+            return git_patch_between(pristine, tree, files_under)
         if old == new:
             continue
         out.extend(difflib.unified_diff(old, new,
@@ -193,6 +197,32 @@ def patch_between(pristine: pathlib.Path, tree: pathlib.Path) -> str:
     # difflib omits the trailing newline marker git apply expects on the last
     # line of a file that has none; a missing one is a refused patch.
     return text if text.endswith("\n") or not text else text + "\n"
+
+
+def git_patch_between(pristine: pathlib.Path, tree: pathlib.Path, files_under) -> str:
+    """`git diff --no-index --binary` over copies named a/ and b/, so the
+    headers read `diff --git a/rel b/rel` with empty prefixes — the -p1 form
+    the marketplace applies and scans — and a binary file rides along."""
+    if not shutil.which("git"):
+        raise AssayError("A file in the work is not text, and sending it needs git, which "
+                         "this machine does not have. Install git (on a Mac: xcode-select "
+                         "--install) and submit again.")
+    with tempfile.TemporaryDirectory() as scratch:
+        for name, root in (("a", pristine), ("b", tree)):
+            for rel, path in files_under(root).items():
+                target = pathlib.Path(scratch) / name / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, target)
+        (pathlib.Path(scratch) / "a").mkdir(exist_ok=True)
+        (pathlib.Path(scratch) / "b").mkdir(exist_ok=True)
+        result = subprocess.run(
+            ["git", "-c", "core.quotepath=false", "diff", "--no-index", "--binary", "--no-color",
+             "--src-prefix=", "--dst-prefix=", "a", "b"],
+            cwd=scratch, capture_output=True, text=True)
+    # git exits 1 when the trees differ, which is the whole point.
+    if result.returncode not in (0, 1):
+        raise AssayError("git could not produce the patch:\n" + (result.stderr or result.stdout))
+    return result.stdout
 
 
 def submit(task_id):

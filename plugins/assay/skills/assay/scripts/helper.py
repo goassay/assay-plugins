@@ -143,6 +143,10 @@ def toolchain_ready() -> list:
                                    capture_output=True, text=True)
             if probe.returncode != 0:
                 missing.append("pytest (python3 -m pip install pytest)")
+    if shutil.which("git") is None:
+        # E23: a submission with a file that is not text is a git binary patch,
+        # which `git diff` writes; the text case needs no git.
+        missing.append("git (a deck or an image comes back as a git patch)")
     if shutil.which("docker") is None:
         missing.append("docker (work.py check runs the tests in a container)")
     elif not sandbox_image_present():
@@ -210,6 +214,7 @@ def ask_claude(prompt: str, timeout: int) -> str:
     """
     WORK.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
+    SESSION["steps"] = []
     if session_runner() == "codex":
         # Codex's headless mode. The same trust as the Claude line below —
         # dontAsk with Bash is a session that runs what it decides, and so is
@@ -218,29 +223,154 @@ def ask_claude(prompt: str, timeout: int) -> str:
         # the docker socket `work check` needs. --ignore-user-config: no MCP
         # servers, no project rules — the session gets the prompt and the
         # tools, as Claude does with an empty --mcp-config.
-        result = subprocess.run(
+        stdout, stderr, code = run_streaming(
             [CODEX, "exec", "--json", "--ignore-user-config", "--skip-git-repo-check",
              "--ephemeral", "--dangerously-bypass-approvals-and-sandbox", "-C", str(WORK), prompt],
-            cwd=WORK, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
-        text, usage = parse_codex_session(result.stdout or "")
+            timeout, codex_step)
+        text, usage = parse_codex_session(stdout)
     else:
-        result = subprocess.run(
-            [CLAUDE, "-p", prompt, "--output-format", "json",
+        # stream-json (E23): one event per line as the session works, so the
+        # steps can be shown while they happen; the last line is the same
+        # result the json format returned, and is read the same way.
+        stdout, stderr, code = run_streaming(
+            [CLAUDE, "-p", prompt, "--output-format", "stream-json", "--verbose",
              "--permission-mode", "dontAsk",
-             "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep",
+             "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep,Task",
              "--mcp-config", '{"mcpServers":{}}', "--strict-mcp-config"],
-            cwd=WORK, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
-        text, usage = parse_session(result.stdout or "")
+            timeout, claude_step)
+        text, usage = parse_session(last_json_line(stdout))
     if usage and not usage.get("duration_ms"):
         usage["duration_ms"] = int((time.monotonic() - started) * 1000)
     SESSION["usage"] = usage
-    return text + (("\n" + result.stderr) if result.returncode != 0 else "")
+    return text + (("\n" + stderr) if code != 0 else "")
+
+
+def run_streaming(command, timeout: int, step_of) -> tuple:
+    """Runs the session and reads its stdout line by line as it comes (E23
+    Decision 6). Each line is offered to `step_of`, which turns the event into
+    a plain line for a person or None; the line goes to the log at once and
+    onto SESSION["steps"] for the marketplace. Returns (stdout, stderr, code)."""
+    process = subprocess.Popen(command, cwd=WORK, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, bufsize=1, stdin=subprocess.DEVNULL)
+    lines = []
+    deadline = time.monotonic() + timeout
+    try:
+        # readline rather than iterating the pipe, so a line is handed on the
+        # moment it ends; the session flushes one event a line.
+        for line in iter(process.stdout.readline, ""):
+            lines.append(line)
+            step = step_of(line)
+            if step:
+                SESSION["steps"].append(step)
+                SESSION["log"]("  " + "  " * step[0] + step[1])
+            if time.monotonic() > deadline:
+                process.kill()
+                break
+        stderr = process.stderr.read()
+        code = process.wait(timeout=30)
+    except Exception:
+        process.kill()
+        raise
+    return "".join(lines), stderr or "", code
+
+
+def last_json_line(stdout: str) -> str:
+    """The result event of a stream-json session, as the json format would have printed it."""
+    for line in reversed(stdout.splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            d = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if d.get("type") == "result":
+            return line
+    return stdout
+
+
+# ── the steps a session takes, in a person's words (E23 Decision 6) ─────────
+
+def short_path(path) -> str:
+    """A path — or a command naming paths — as the person reads it: relative
+    to the scratch root, never the machine's. One line, 120 characters."""
+    text = str(path or "").replace(str(WORK) + "/", "").replace(str(WORK), ".")
+    text = " ".join(text.split())
+    return text[:120]
+
+
+def claude_step(line: str):
+    """One stream-json event from Claude Code into (depth, line), or None.
+
+    A tool use is a step; a subagent's tool use carries parent_tool_use_id and
+    sits one level in. Nothing from a file's contents is kept — the action and
+    the path only."""
+    line = line.strip()
+    if not line.startswith("{"):
+        return None
+    try:
+        d = json.loads(line)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if d.get("type") != "assistant":
+        return None
+    depth = 1 if d.get("parent_tool_use_id") else 0
+    for block in (d.get("message") or {}).get("content") or []:
+        if block.get("type") != "tool_use":
+            continue
+        name, inp = block.get("name"), block.get("input") or {}
+        if name == "Read":     return (depth, "reading " + short_path(inp.get("file_path")))
+        if name == "Write":    return (depth, "writing " + short_path(inp.get("file_path")))
+        if name == "Edit":     return (depth, "editing " + short_path(inp.get("file_path")))
+        if name == "Bash":     return (depth, "running: " + short_path(inp.get("command")))
+        if name in ("Glob", "Grep"): return (depth, "searching for " + str(inp.get("pattern") or "")[:80])
+        if name == "Task":     return (depth, "asked a subagent: " + short_path(inp.get("description")))
+        return (depth, "using " + str(name))
+    return None
+
+
+def codex_step(line: str):
+    """One JSONL event from `codex exec --json` into (depth, line), or None."""
+    line = line.strip()
+    if not line.startswith("{"):
+        return None
+    try:
+        d = json.loads(line)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if d.get("type") != "item.started" and d.get("type") != "item.completed":
+        return None
+    item = d.get("item") or {}
+    kind = item.get("type")
+    if d.get("type") == "item.started" and kind == "command_execution":
+        return (0, "running: " + str(item.get("command") or "")[:120])
+    if d.get("type") == "item.completed" and kind == "file_change":
+        verbs = {"add": "writing", "update": "editing", "delete": "deleting"}
+        changes = item.get("changes") or []
+        if changes:
+            c = changes[0]
+            return (0, verbs.get(str(c.get("kind")), "changing") + " " + short_path(c.get("path")))
+    if d.get("type") == "item.started" and kind == "web_search":
+        return (0, "searching the web")
+    return None
+
+
+def post_steps(award_id: str, steps: list, log) -> None:
+    """The session's steps, to the marketplace, beside the award (E23 Decision 6).
+    Best effort: a failure here is logged and does not fail the job."""
+    if not steps:
+        return
+    try:
+        call("POST", f"/v1/awards/{award_id}/steps",
+             {"steps": [{"depth": d, "line": l} for d, l in steps[:2000]]})
+    except Exception as problem:  # noqa: BLE001 — the work is done; the log is extra
+        log(f"could not send the steps: {problem}")
 
 
 # The last session's bill, for the caller to record. A module dict rather
 # than an attribute on the function, so a test can stand a lambda in for
 # ask_claude and still say what it cost.
-SESSION: dict = {"usage": {}}
+SESSION: dict = {"usage": {}, "steps": [], "log": print}
 
 
 def parse_session(stdout: str):
@@ -377,8 +507,10 @@ def one_pass(now=None, log=print) -> dict:
         log(f"award held on {award['taskId']} ({award.get('title', '')}) — starting the session")
         state["attempts"][award["taskId"]] = state["attempts"].get(award["taskId"], 0) + 1
         save_state(state)
+        SESSION["log"] = log
         report = ask_claude(work_prompt(award), timeout=3600)
         record_cost(award["taskId"], "work", SESSION["usage"], log)
+        post_steps(award["awardId"], SESSION.get("steps") or [], log)
         keep_transcript(award["taskId"], state["attempts"][award["taskId"]], report)
         log(report.strip().splitlines()[-1] if report.strip() else "(no report)")
         if "SUBMITTED" in report:
@@ -461,8 +593,8 @@ def main(argv) -> int:
     # silence read as failure, because nothing said it was the intended state.
     try:
         me = call("GET", "/v1/agents/me") or {}
-        print(f"helper {me.get('handle', '?')} · {me.get('tier', '?').lower().replace('_', ' ')} · "
-              f"looking for work every {INTERVAL}s · leave this running", flush=True)
+        print(f"helper {me.get('handle', '?')}, {me.get('tier', '?').lower().replace('_', ' ')}, "
+              f"looking for work every {INTERVAL}s. Leave this running.", flush=True)
     except AssayError as problem:
         print(problem, file=sys.stderr)
         return 2
@@ -470,13 +602,16 @@ def main(argv) -> int:
     if missing:
         print("this machine lacks: " + ", ".join(missing), file=sys.stderr, flush=True)
     while True:
-        stamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        # The stamp is taken per line, not per pass: with one stamp a pass
+        # long, every step of a two-minute session printed with the same time
+        # (the E23 walk), which made a live log look like a dump.
+        stamp = lambda: datetime.now(timezone.utc).strftime("%H:%M:%S")  # noqa: E731
         try:
-            did = one_pass(log=lambda line: print(f"[{stamp}] {line}", flush=True))
+            did = one_pass(log=lambda line: print(f"[{stamp()}] {line}", flush=True))
             if not any(did.values()):
-                print(f"[{stamp}] nothing to do — no job I can go for, no award held", flush=True)
+                print(f"[{stamp()}] nothing to do — no job I can go for, no award held", flush=True)
         except AssayError as problem:
-            print(f"[{stamp}] {problem}", file=sys.stderr, flush=True)
+            print(f"[{stamp()}] {problem}", file=sys.stderr, flush=True)
         except subprocess.TimeoutExpired:
             print(f"[{stamp}] the session ran out of time", file=sys.stderr, flush=True)
         if once:

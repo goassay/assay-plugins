@@ -49,7 +49,10 @@ from assay import AssayError, call  # noqa: E402
 # here first so a publisher learns about an oversized file before the request
 # is built rather than from a 413 with the whole package in flight.
 MAX_FILE_CHARS = 200_000
-MAX_PACKAGE_CHARS = 1_000_000
+# E23: a file that is not text goes as base64, 8 MiB of bytes at most; the
+# package as a whole is 24 MiB, counted in bytes, text and binary together.
+MAX_BINARY_BYTES = 8 * 1024 * 1024
+MAX_PACKAGE_BYTES = 24 * 1024 * 1024
 
 
 def derive_package(root):
@@ -82,9 +85,17 @@ def derive_package(root):
             try:
                 content = path.read_text(encoding="utf-8")
             except UnicodeDecodeError:
-                raise AssayError(
-                    f"{relative} is not UTF-8 text and will not be sent.\n"
-                    "A package is the scoped source a worker needs, not assets.") from None
+                # E23: a deck, an image, a PDF — sent as its bytes, base64.
+                import base64
+                raw = path.read_bytes()
+                if len(raw) > MAX_BINARY_BYTES:
+                    raise AssayError(
+                        f"{relative} is {len(raw):,} bytes; a file that is not text may be "
+                        f"{MAX_BINARY_BYTES:,} at most.") from None
+                total += len(raw)
+                files.append({"path": relative, "content": base64.b64encode(raw).decode("ascii"),
+                              "encoding": "base64", "bytes": len(raw)})
+                continue
 
             if len(content) > MAX_FILE_CHARS:
                 raise AssayError(
@@ -95,10 +106,10 @@ def derive_package(root):
 
     if not files:
         raise AssayError(f"{root} holds nothing that can be sent.")
-    if total > MAX_PACKAGE_CHARS:
+    if total > MAX_PACKAGE_BYTES:
         raise AssayError(
-            f"The package is {total:,} characters; the limit is {MAX_PACKAGE_CHARS:,}.\n"
-            "A package is the scoped source a worker needs, not a repository.")
+            f"The package is {total:,} bytes; the limit is {MAX_PACKAGE_BYTES:,}.\n"
+            "A package is what a worker needs for the job, not a repository.")
     if not any(f["path"] == "run.sh" for f in files):
         raise AssayError(
             "The package has no run.sh at its root.\n"
@@ -109,8 +120,10 @@ def derive_package(root):
 
 def manifest(files):
     """What is about to leave, one line a file, for a person to read."""
-    lines = [f"  {len(f['content']):>9,}  {f['path']}" for f in files]
-    total = sum(len(f["content"]) for f in files)
+    def size(f): return f.get("bytes", len(f["content"]))
+    lines = [f"  {size(f):>9,}  {f['path']}" + ("  (binary)" if f.get("encoding") == "base64" else "")
+             for f in files]
+    total = sum(size(f) for f in files)
     lines.append(f"  {total:>9,}  ({len(files)} files)")
     return "\n".join(lines)
 
@@ -165,7 +178,7 @@ def main(argv):
         "publicSuite": read(args.public),
         "hiddenSuite": read(args.hidden),
         "regressionSuite": read(args.regression) if args.regression else "",
-        "workPackage": files,
+        "workPackage": [{k: v for k, v in f.items() if k != "bytes"} for f in files],
         "inScopePaths": args.scope,
     }
     published = call("POST", "/v1/tasks", body)
