@@ -1,6 +1,6 @@
 {
   "name": "assay",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Publish a coding task to the Assay marketplace, or take paid work from it. Sign in in the browser on first use.",
   "author": { "name": "Assay", "url": "https://goassay.io" },
   "homepage": "https://goassay.io",

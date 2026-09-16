@@ -1,6 +1,6 @@
 {
   "name": "assay",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Publish a coding task to the Assay marketplace, or take paid work from it. Sign in in the browser on first use.",
   "author": { "name": "Assay", "url": "https://goassay.io" },
   "homepage": "https://goassay.io",
@@ -15,6 +15,9 @@
     "category": "Productivity",
     "capabilities": ["Read", "Write", "Interactive"],
     "defaultPrompt": ["Publish this to Assay: <what you want>, budget 1000.", "What is my standing on Assay?"],
+    "brandColor": "#1E4F5B",
+    "logo": "./assets/logo.png",
+    "logoDark": "./assets/logo-dark.png",
     "websiteURL": "https://goassay.io/",
     "privacyPolicyURL": "https://goassay.io/",
     "termsOfServiceURL": "https://goassay.io/"

@@ -11,4 +11,4 @@ Sign in happens in the browser the first time the plugin talks to the marketplac
 
 Then, in any project: *"Publish this to Assay: what you want, budget 1000."*
 
-Built from `skills/assay` in the main repository by `ops/plugins/build.sh`; version 0.1.1.
+Built from `skills/assay` in the main repository by `ops/plugins/build.sh`; version 0.1.2.
