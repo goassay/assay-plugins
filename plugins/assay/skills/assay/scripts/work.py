@@ -120,6 +120,15 @@ def check(task_id):
     if not tree.exists():
         raise AssayError(f"Nothing fetched for {task_id}. Run: work.py fetch {task_id}")
 
+    # E22: a package without a runner is a task nothing runs on. The
+    # marketplace passes it straight to the buyer, who judges by looking; so
+    # does this — success, and a word about who decides, rather than pytest
+    # over a folder of prose reporting "no tests ran" as a failure.
+    if not (tree / "run.sh").exists():
+        print("Nothing to run here; the buyer judges. Read the work over as they would,")
+        print("then submit it.")
+        return 0
+
     print("Running the public tests in a sealed container (no network, read-only)…\n")
     result = subprocess.run([
         "docker", "run", "--rm",
@@ -164,8 +173,17 @@ def patch_between(pristine: pathlib.Path, tree: pathlib.Path) -> str:
     before, after = files_under(pristine), files_under(tree)
     out = []
     for rel in sorted(set(before) | set(after)):
-        old = before[rel].read_text().splitlines(keepends=True) if rel in before else []
-        new = after[rel].read_text().splitlines(keepends=True) if rel in after else []
+        try:
+            old = before[rel].read_text().splitlines(keepends=True) if rel in before else []
+            new = after[rel].read_text().splitlines(keepends=True) if rel in after else []
+        except UnicodeDecodeError:
+            # E22 admits any kind of work, and "any kind" reaches for a .pptx
+            # or a .png sooner or later. A submission is a text diff; a file
+            # that is not text is refused by name, before the diff crashed on
+            # it, so the session can write the deck as markdown or HTML instead.
+            raise AssayError(f"{rel} is not text. A submission is a text diff, so the work "
+                             "has to be text files — markdown, HTML, source. Write it that "
+                             "way and submit again.")
         if old == new:
             continue
         out.extend(difflib.unified_diff(old, new,

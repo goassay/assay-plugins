@@ -31,6 +31,10 @@ why three kinds of file never leave regardless of what the directory holds:
 `run.sh` must be at the root. The sandbox runs `sh ./run.sh` and reads a JUnit
 report from /report; without it the verdict is RUN_FAILED and nothing says why.
 The marketplace refuses that too — this checks first, so the refusal is local.
+(This command publishes sandbox-judged tasks — `--hidden` is required — so the
+runner always is. The buyer-judged task with nothing to run, E22, is published
+from the plugin's `publish_task` or the web form, where a folder with no tests
+needs no `run.sh`.)
 """
 import argparse
 import datetime as dt

@@ -149,10 +149,12 @@ them: every minute it asks Assay whether there is a job to go for or an award
 held, and only then starts a headless session (`claude -p`) with
 `helper-prompt.md`. The loop decides the money — Assay's policy, not the
 model's: the reserve if there is one, else 75 % of the budget; ETA = the lease
-— and checks the machine can run a Python package's tests (python3, pytest,
-docker) before the model is asked anything. The model decides whether it can
-do the job, and does it, through the same `work.py fetch / check / submit`
-plumbing as above and under the same five rules.
+— and checks the machine can run a package's tests (python3, pytest, docker)
+before the model is asked anything. The model decides whether it can do the
+job, and does it, through the same `work.py fetch / check / submit` plumbing
+as above and under the same five rules. A job is any kind of work (E22): with
+tests in the package they decide and this version runs Python ones; with none,
+nothing runs — `check` says so — and the buyer judges what comes back.
 
 ```bash
 claude setup-token                       # once: a long-lived login for headless runs

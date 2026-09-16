@@ -17,7 +17,12 @@ import stat
 import urllib.error
 import urllib.request
 
-CREDENTIALS = pathlib.Path.home() / ".assay" / "credentials"
+# ASSAY_CREDENTIALS names another file, for a second helper on a machine that
+# already runs one — the E22 walk ran a local helper beside the owner's
+# production one, and a fixed path would have handed the local stack the
+# production key. Unset, the file the installer and the desktop app write.
+CREDENTIALS = pathlib.Path(os.environ.get("ASSAY_CREDENTIALS")
+                           or (pathlib.Path.home() / ".assay" / "credentials"))
 DEFAULT_BASE = "http://127.0.0.1:5173"
 
 

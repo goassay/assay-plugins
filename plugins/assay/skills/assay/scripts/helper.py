@@ -114,6 +114,22 @@ def looks_like_python(public_suite: str) -> bool:
     return ("def test_" in text or "import pytest" in text) and "package main" not in text
 
 
+def can_take(task, public_suite: str) -> str:
+    """Why this helper cannot take the task, in words, or "" when it can (E22).
+
+    The language check applies only to tests that will run. A task where
+    nothing runs — no runner, the buyer judges — is any kind of work: a deck,
+    a document, a page. The owner's first real task was a JavaScript app the
+    old check skipped as "not a Python package", and the ruling was that the
+    language of the work is no business of the marketplace's. A server older
+    than E22 says nothing about `runnable`; that server required a runner on
+    every task, so nothing said means it runs.
+    """
+    if task.get("runnable", True) and not looks_like_python(public_suite):
+        return "its tests are in a language this helper cannot run yet"
+    return ""
+
+
 def toolchain_ready() -> list:
     """What is missing on this machine for a Python package, in words; empty means ready."""
     missing = []
@@ -309,15 +325,25 @@ def keep_transcript(task_id: str, attempt: int, report: str) -> None:
     (folder / f"{task_id}-{attempt}.txt").write_text(report)
 
 
-def decide_prompt(task, spec: str, public_suite: str) -> str:
+def decide_prompt(task, spec: str, public_suite: str, runnable: bool = True) -> str:
+    # E22: with nothing to run, the job is whatever the spec asks for and the
+    # buyer decides by looking at it — so the question is whether it can be
+    # done, not whether it can be done in Python.
+    judged = (as_untrusted("THE PUBLIC TESTS", public_suite) + "\n\n"
+              "Answer with exactly one line: YES if you are confident you can implement this "
+              "in Python from what is here, otherwise NO and why."
+              if runnable else
+              "Nothing runs on this one: there are no tests, and the buyer looks at the work "
+              "and says yes or no. The work can be any kind — text, a document, a deck, a "
+              "page — as files in the package's folder.\n\n"
+              "Answer with exactly one line: YES if you are confident you can do this well "
+              "from what is here, otherwise NO and why.")
     return (PROMPT.read_text() + "\n\n"
             "THIS PASS: decide only. Do not bid, fetch or submit — the loop places the bid.\n"
             f"Task {task['id']}: {task.get('title', '')}\n"
             f"Price Assay will bid: {price_for(task)} credits; ETA {eta_for(task)} seconds.\n\n"
             + as_untrusted("THE JOB", spec) + "\n\n"
-            + as_untrusted("THE PUBLIC TESTS", public_suite) + "\n\n"
-            "Answer with exactly one line: YES if you are confident you can implement this "
-            "in Python from what is here, otherwise NO and why.")
+            + judged)
 
 
 def work_prompt(award) -> str:
@@ -331,7 +357,9 @@ def work_prompt(award) -> str:
             "and prints the job.\n"
             "  2. Do the work in that directory and nowhere else, touching only the paths it says you may.\n"
             f"  3. `{work} check {task_id}` — the public tests, in a container. If this command "
-            "cannot run at all (no docker, no image), STOP and say so; do not submit.\n"
+            "cannot run at all (no docker, no image), STOP and say so; do not submit. If it says "
+            "there is nothing to run, the buyer judges by looking: read your work over as they "
+            "would, then go on.\n"
             f"  4. When they pass: `{work} submit {task_id}`.\n"
             "End with one line: SUBMITTED, or STOPPED and why.")
 
@@ -365,13 +393,15 @@ def one_pass(now=None, log=print) -> dict:
             continue
         detail = call("GET", f"/v1/tasks/{task['id']}")
         suite = (detail or {}).get("publicSuite") or ""
-        if not looks_like_python(suite):
-            did["skipped"].append((task["id"], "not a Python package"))
+        why_not = can_take(task, suite)
+        if why_not:
+            did["skipped"].append((task["id"], why_not))
             continue
         if missing:
             did["skipped"].append((task["id"], "this machine lacks " + ", ".join(missing)))
             continue
-        answer = ask_claude(decide_prompt(task, (detail or {}).get("specMarkdown", ""), suite), timeout=600)
+        answer = ask_claude(decide_prompt(task, (detail or {}).get("specMarkdown", ""), suite,
+                                          runnable=task.get("runnable", True)), timeout=600)
         record_cost(task["id"], "decide", SESSION["usage"], log)
         if answer.strip().upper().startswith("YES") or "\nYES" in answer.upper():
             price, eta = price_for(task), eta_for(task)
