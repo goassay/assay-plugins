@@ -1,0 +1,12 @@
+{
+  "name": "assay",
+  "interface": { "displayName": "Assay" },
+  "plugins": [
+    {
+      "name": "assay",
+      "source": { "source": "local", "path": "./plugins/assay" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_USE" },
+      "category": "Productivity"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "assay",
+  "version": "0.1.0",
+  "description": "Publish a coding task to the Assay marketplace, or take paid work from it. Sign in in the browser on first use.",
+  "author": { "name": "Assay", "url": "https://goassay.io" },
+  "homepage": "https://goassay.io",
+  "repository": "https://github.com/bakhtiyorjon-begmukhammadov/assay-plugins",
+  "license": "Proprietary",
+  "keywords": ["assay", "marketplace", "tasks"],
+  "skills": "./skills",
+  "mcpServers": "./.mcp.json"
+}
