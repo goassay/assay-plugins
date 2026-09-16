@@ -108,37 +108,24 @@ def bidding_open(task, now: datetime) -> bool:
     return datetime.fromisoformat(closes.replace("Z", "+00:00")) > now
 
 
-def looks_like_python(public_suite: str) -> bool:
-    """The only toolchain this version can run. Anything else is skipped, not guessed at."""
-    text = public_suite or ""
-    return ("def test_" in text or "import pytest" in text) and "package main" not in text
-
-
-def looks_like_node(public_suite: str) -> bool:
-    """A JavaScript suite: test( or it( at the start of a line (E22 Part 2)."""
-    return bool(re.search(r"(?m)^\s*(?:test|it)\s*\(", public_suite or ""))
-
-
 def can_take(task, public_suite: str, log=print) -> str:
     """Why this helper cannot take the task, in words, or "" when it can (E22).
 
-    The language check applies only to tests that will run, and to the
-    sandbox the task names (E22 Part 2): Python tests in the Python box, Node
-    tests in the Node box; the box is built the first time it is needed. A
+    The one check is the box: a task whose tests run names the sandbox they
+    run in (E22 Part 2), and the helper builds that box the first time it is
+    needed. Nothing here reads the tests to guess a language. There was such
+    a rule — "its tests do not look like Python", wanting `def test_` or
+    `import pytest` — and it skipped the owner's second real task, a plain
+    Python script that `run.sh` runs and that writes its own report. The
+    task says where its tests run and `run.sh` says how; whether they pass
+    is `work check`'s to find out, in the box, the way the verifier will. A
     task where nothing runs — no runner, the buyer judges — is any kind of
-    work: a deck, a document, a page. The owner's first real task was a
-    JavaScript app the old check skipped as "not a Python package", and the
-    ruling was that the language of the work is no business of the
-    marketplace's. A server older than E22 says nothing about `runnable`;
-    that server required a runner on every task, so nothing said means it
-    runs.
+    work. A server older than E22 says nothing about `runnable`; that server
+    required a runner on every task, so nothing said means it runs.
     """
     if not task.get("runnable", True):
         return ""
     sandbox = str(task.get("sandbox") or "python")
-    looks_right = looks_like_node(public_suite) if sandbox == "node" else looks_like_python(public_suite)
-    if not looks_right:
-        return "its tests do not look like " + ("JavaScript" if sandbox == "node" else "Python")
     if not ensure_image(sandbox, log):
         return f"this machine lacks the {sandbox_image(sandbox)} image and could not build it"
     return ""
@@ -465,10 +452,14 @@ def keep_transcript(task_id: str, attempt: int, report: str) -> None:
 def decide_prompt(task, spec: str, public_suite: str, runnable: bool = True) -> str:
     # E22: with nothing to run, the job is whatever the spec asks for and the
     # buyer decides by looking at it — so the question is whether it can be
-    # done, not whether it can be done in Python.
+    # done. With tests, the question is whether these tests can be made to
+    # pass; the language is whatever the package and its run.sh use.
     judged = (as_untrusted("THE PUBLIC TESTS", public_suite) + "\n\n"
-              "Answer with exactly one line: YES if you are confident you can implement this "
-              "in Python from what is here, otherwise NO and why."
+              "The package's run.sh runs these in the "
+              + ("Node" if str(task.get("sandbox") or "python") == "node" else "Python")
+              + " box, and they decide. "
+              "Answer with exactly one line: YES if you are confident you can do this and "
+              "make these tests pass from what is here, otherwise NO and why."
               if runnable else
               "Nothing runs on this one: there are no tests, and the buyer looks at the work "
               "and says yes or no. The work can be any kind — text, a document, a deck, a "

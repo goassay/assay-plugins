@@ -149,12 +149,13 @@ them: every minute it asks Assay whether there is a job to go for or an award
 held, and only then starts a headless session (`claude -p`) with
 `helper-prompt.md`. The loop decides the money — Assay's policy, not the
 model's: the reserve if there is one, else 75 % of the budget; ETA = the lease
-— and checks the machine can run a package's tests (python3, pytest, docker)
-before the model is asked anything. The model decides whether it can do the
+— and checks the machine can run a package's tests (docker, and the box the
+task names, built if it is missing) before the model is asked anything. The model decides whether it can do the
 job, and does it, through the same `work.py fetch / check / submit` plumbing
 as above and under the same five rules. A job is any kind of work (E22): with
-tests in the package they decide and this version runs Python ones; with none,
-nothing runs — `check` says so — and the buyer judges what comes back.
+tests in the package they decide, run in the box the task names (Python or
+Node today; another language is one Dockerfile); with none, nothing runs —
+`check` says so — and the buyer judges what comes back.
 
 ```bash
 claude setup-token                       # once: a long-lived login for headless runs
@@ -162,7 +163,7 @@ python3 skills/assay/scripts/helper.py   # from a checkout; runs until stopped; 
 
 # A person without a checkout installs it with one command, served by the app
 # (E16 Revision 2): it fetches this folder to ~/.assay/helper, makes a private
-# Python with pytest, builds the sandbox image, asks for the key, connects
+# Python with pytest, builds the sandbox images, asks for the key, connects
 # Claude and starts. Later: ~/.assay/helper/start
 sh -c "$(curl -fsSL https://app.goassay.io/helper/install.sh)"
 ```
