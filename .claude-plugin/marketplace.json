@@ -1,8 +1,8 @@
 {
   "name": "assay",
   "owner": { "name": "Assay", "url": "https://goassay.io" },
-  "metadata": { "description": "The Assay marketplace's plugin: publish tasks, take paid work.", "version": "0.1.7" },
+  "metadata": { "description": "The Assay marketplace's plugin: publish tasks, take paid work.", "version": "0.1.8" },
   "plugins": [
-    { "name": "assay", "source": "./plugins/assay", "description": "Publish a task to Assay, any kind of work, or take paid work from it.", "version": "0.1.7" }
+    { "name": "assay", "source": "./plugins/assay", "description": "Publish a task to Assay, any kind of work, or take paid work from it.", "version": "0.1.8" }
   ]
 }

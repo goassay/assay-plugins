@@ -160,6 +160,30 @@ def toolchain_ready() -> list:
 
 
 
+def out_of_reach(task, standing) -> str:
+    """Why the marketplace would refuse this helper's bid before the session
+    is asked, in words, or "" when it would not.
+
+    The gate (E4, `BidGate`) caps an unproven agent at a task value and at a
+    number of open bids, and `/v1/agents/me/standing` says both. Read here
+    first because asking the session costs money: on 2026-09-16 the owner's
+    desktop app said YES to a 12,000 task every minute, was refused every
+    minute as an unproven agent capped at 10,000, and paid for the decision
+    each time. A refusal the helper can see coming is a line in the log and
+    no question asked.
+    """
+    if not isinstance(standing, dict):
+        return ""
+    ceiling = standing.get("taskValueCeiling")
+    if ceiling is not None and int(task.get("maxBudget") or 0) > int(ceiling):
+        return (f"its budget is {task.get('maxBudget')} and an unproven helper may take up to "
+                f"{ceiling}; smaller tasks lift the ceiling")
+    cap = standing.get("openBidCap")
+    if cap is not None and int(standing.get("openBids") or 0) >= int(cap):
+        return f"I already hold {standing.get('openBids')} open bids, the cap for now"
+    return ""
+
+
 def worth_asking(task, now: datetime, already_bid: set) -> bool:
     """Open, still accepting bids, not already bid on by this helper."""
     return (task.get("status") == "OPEN"
@@ -518,8 +542,15 @@ def one_pass(now=None, log=print) -> dict:
 
     # Then the board.
     missing = toolchain_ready()
+    standing = call("GET", "/v1/agents/me/standing")
     for task in call("GET", "/v1/tasks") or []:
         if not worth_asking(task, now, set(state["bid"])):
+            continue
+        beyond = out_of_reach(task, standing)
+        if beyond:
+            # Not remembered: standing changes, and a task above the ceiling
+            # today may be within it after the next small one is paid.
+            did["skipped"].append((task["id"], beyond))
             continue
         detail = call("GET", f"/v1/tasks/{task['id']}")
         suite = (detail or {}).get("publicSuite") or ""
@@ -535,8 +566,18 @@ def one_pass(now=None, log=print) -> dict:
         record_cost(task["id"], "decide", SESSION["usage"], log)
         if answer.strip().upper().startswith("YES") or "\nYES" in answer.upper():
             price, eta = price_for(task), eta_for(task)
-            call("POST", f"/v1/tasks/{task['id']}/bids",
-                 {"price": price, "etaSeconds": eta, "modelDeclared": model_declared()})
+            try:
+                call("POST", f"/v1/tasks/{task['id']}/bids",
+                     {"price": price, "etaSeconds": eta, "modelDeclared": model_declared()})
+            except AssayError as refused:
+                # The marketplace said no in words; they go in the log, and the
+                # task is remembered so the session is not asked again next
+                # minute. Before this, the error left the pass and the state
+                # unsaved, so the same YES was bought once a minute.
+                did["skipped"].append((task["id"], f"the marketplace refused the bid: {refused}"))
+                state["bid"].append(task["id"])
+                save_state(state)
+                continue
             log(f"bid {price} on {task['id']} ({task.get('title', '')})")
             state["bid"].append(task["id"])
             did["bid"].append(task["id"])
@@ -611,7 +652,7 @@ def main(argv) -> int:
         except AssayError as problem:
             print(f"[{stamp()}] {problem}", file=sys.stderr, flush=True)
         except subprocess.TimeoutExpired:
-            print(f"[{stamp}] the session ran out of time", file=sys.stderr, flush=True)
+            print(f"[{stamp()}] the session ran out of time", file=sys.stderr, flush=True)
         if once:
             return 0
         time.sleep(INTERVAL)
