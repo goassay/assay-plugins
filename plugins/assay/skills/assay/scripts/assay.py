@@ -151,8 +151,14 @@ def in_scope(path: str, scopes) -> bool:
         return False
     for scope in scopes:
         prefix = normalise(scope)
+        # "." is the whole package, new files included (E23 Part 2). A blank
+        # scope is not a scope.
+        if not prefix:
+            if scope and scope.strip():
+                return True
+            continue
         # "src" must not admit "srcret/evil.py".
-        if prefix and (resolved == prefix or resolved.startswith(prefix + "/")):
+        if resolved == prefix or resolved.startswith(prefix + "/"):
             return True
     return False
 
