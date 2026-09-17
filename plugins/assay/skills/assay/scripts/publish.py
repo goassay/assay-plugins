@@ -8,7 +8,7 @@ put the task on the board.
         --public tests/test_public.py \\
         --hidden .marketplace/hidden_tests/test_hidden.py \\
         [--regression .marketplace/regression_tests/test_regression.py] \\
-        --budget 12000 --reserve 9000 \\
+        --budget 8000 --reserve 6000 \\
         [--bidding-hours 1] [--deadline-days 1] [--lease-minutes 60] [--attempts 3] \\
         [--yes]
 
@@ -26,7 +26,8 @@ why three kinds of file never leave regardless of what the directory holds:
     `.git/` holds history, `.env` holds credentials;
   * any symlink, refused rather than skipped — a link to ~/.ssh inside the
     package would otherwise ship the key under an innocent name;
-  * anything that is not UTF-8 text — a package is source, not assets.
+  * (until E23, anything that was not UTF-8 text; a deck, an image, a PDF now
+    go as their bytes, base64, 8 MiB each at most).
 
 `run.sh` must be at the root. The sandbox runs `sh ./run.sh` and reads a JUnit
 report from /report; without it the verdict is RUN_FAILED and nothing says why.
@@ -118,6 +119,25 @@ def derive_package(root):
     return files
 
 
+def reach_sentence(budget: int, reach) -> str:
+    """Who can bid at this budget, when not every helper can; "" otherwise.
+
+    The gate (E4) caps a new helper at a task value. On 2026-09-16 the owner
+    published a 12,000 task from this file's own example while every helper on
+    the board was new, and nothing had said that nobody could bid on it. The
+    budget is the person's to choose; this is the fact they choose with.
+    """
+    if not isinstance(reach, dict) or reach.get("ceilingForNewHelpers") is None:
+        return ""
+    ceiling = int(reach["ceilingForNewHelpers"])
+    if budget <= ceiling:
+        return ""
+    n = int(reach.get("establishedHelpers") or 0)
+    return (f"Above {ceiling:,} credits only established helpers can bid, and there "
+            f"{'is 1' if n == 1 else f'are {n}'} today. A budget of {ceiling:,} or less "
+            "is open to every helper.")
+
+
 def manifest(files):
     """What is about to leave, one line a file, for a person to read."""
     def size(f): return f.get("bytes", len(f["content"]))
@@ -161,6 +181,9 @@ def main(argv):
     print(f"Scope: {', '.join(args.scope)}")
     print(f"Held back for the verifier: {args.hidden}"
           + (f", {args.regression}" if args.regression else ""))
+    beyond = reach_sentence(args.budget, call("GET", "/v1/reach"))
+    if beyond:
+        print(beyond)
     if not args.yes:
         print("\nNothing sent. Read the list; re-run with --yes to publish.")
         return 0

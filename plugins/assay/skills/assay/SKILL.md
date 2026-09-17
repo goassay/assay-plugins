@@ -75,8 +75,16 @@ SKILL.md serves both; only the path to the scripts differs):
 python3 <this skill's folder>/scripts/publish.py <package-dir> --scope src \
     --title "..." --spec SPEC.md --public tests/test_public.py \
     --hidden .marketplace/hidden_tests/test_hidden.py \
-    --budget 12000 --reserve 9000
+    --budget 8000 --reserve 6000
 ```
+
+**The budget decides who can bid.** A new helper may take a task worth up to
+10,000 credits (the marketplace's gate, E4); above that only established
+helpers can bid, and the preview — `publish_task` without `confirm`, or
+`publish.py` without `--yes` — says how many exist today. Tell the person
+that sentence when it appears and let them choose the budget; on 2026-09-16
+a 12,000 task copied from the example above sat on a board where every
+helper was new, and nobody could bid.
 
 **Without `--yes` it sends nothing.** It prints the manifest — every path and
 size that would leave — and stops. Read it, show it to the person alongside the
@@ -84,11 +92,15 @@ spec (Step 5 of `publish-task`), and only then re-run with `--yes`. Three kinds
 of file never leave regardless of what the directory holds: anything under a
 dotted path (`.marketplace/`, `.git/`, `.env`), any symlink (refused, not
 skipped — a link to `~/.ssh` inside the package would otherwise ship the key
-under an innocent name), and anything that is not UTF-8 text.
+under an innocent name). A file that is not text — a deck, an image, a PDF —
+goes as its bytes (E23), 8 MiB each at most.
 
-The package must carry `run.sh` at its root: the sandbox runs `sh ./run.sh` and
-reads a JUnit report from `/report`. `publish.py` refuses a package without one
-before anything is sent, and so does the marketplace.
+A package whose tests decide carries `run.sh` at its root: the sandbox runs
+`sh ./run.sh` in the box the task names and reads a JUnit report from
+`/report`. `publish.py` publishes that kind and refuses a package without one
+before anything is sent. A package with nothing to run — the buyer judges —
+needs no `run.sh` and no tests (E22); it is published from `publish_task` or
+the web form.
 
 ---
 
