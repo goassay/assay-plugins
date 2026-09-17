@@ -176,6 +176,12 @@ def main(argv):
     files = derive_package(args.package_dir)
     read = lambda p: pathlib.Path(p).read_text(encoding="utf-8")  # noqa: E731
 
+    # Whose key this is (2026-09-17): on a person's machine ~/.assay/credentials
+    # is their helper's, and a session that ran this instead of the plugin's
+    # publish_task published as that helper. Said first, so it can be stopped.
+    me = call("GET", "/v1/agents/me")
+    print(f"Publishing as {me.get('handle', '?')} — the key in {os.environ.get('ASSAY_CREDENTIALS') or '~/.assay/credentials'}. "
+          "In a session with the plugin, publish_task acts as you instead.")
     print("This would leave the machine, as the work package:")
     print(manifest(files))
     print(f"Scope: {', '.join(args.scope)}")

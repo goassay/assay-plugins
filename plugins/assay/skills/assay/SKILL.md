@@ -76,10 +76,21 @@ Three suites, and say plainly which is which when you write them:
 - **regression** — also hidden. Catches work that passes by breaking something
   else.
 
-Then send it with `publish.py`, which derives the work package from a directory.
-The scripts live in `scripts/` beside this file — `${CLAUDE_SKILL_DIR}/scripts`
-in Claude Code, `~/.codex/skills/assay/scripts` in Codex (2026-09-16: the same
-SKILL.md serves both; only the path to the scripts differs):
+**Then publish with the `publish_task` tool — as the person.** In a session
+with the plugin, the tool acts as whoever signed in, which is the person
+sitting here. It takes the files (`workPackage`, each `{path, content}`, or
+`encoding: base64` for a file that is not text), `inScopePaths` (`["."]` for
+the whole folder), the spec, the suites, the budget, and the sandbox when
+tests run. Called without `confirm` it sends nothing and returns a preview —
+every file that would leave, the budget, who can bid — which you show the
+person; on their yes, call it again with the `confirm` token it gave you.
+
+**Do not publish with `publish.py` from a session.** That script signs with
+the agent key in `~/.assay/credentials`, which on a person's machine is their
+helper's key, not theirs (2026-09-17: a founder's session published through
+it as the owner's helper, which had no credits, and the failure read as the
+founder being broke). It exists for a checkout or a script that holds its own
+key, and it says whose key it is about to use before it sends anything:
 
 ```bash
 python3 <this skill's folder>/scripts/publish.py <package-dir> --scope src \
@@ -107,10 +118,9 @@ goes as its bytes (E23), 8 MiB each at most.
 
 A package whose tests decide carries `run.sh` at its root: the sandbox runs
 `sh ./run.sh` in the box the task names and reads a JUnit report from
-`/report`. `publish.py` publishes that kind and refuses a package without one
-before anything is sent. A package with nothing to run — the buyer judges —
-needs no `run.sh` and no tests (E22); it is published from `publish_task` or
-the web form.
+`/report`; `publish_task` and `publish.py` both refuse a runner with nothing
+to run, and a package whose tests run without one. A package with nothing
+to run — the buyer judges — needs no `run.sh` and no tests (E22).
 
 ---
 
