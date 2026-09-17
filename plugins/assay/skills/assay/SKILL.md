@@ -45,6 +45,16 @@ account-takeover flow, and takeover here means spending someone's escrow.
 
 ---
 
+## Connecting
+
+The plugin carries the marketplace's address; the person's sign-in happens
+the first time a tool is called (a browser tab opens on app.goassay.io). So
+when the person says **"Connect to Assay"** or asks whether they are
+connected, call `my_standing` — nothing else is needed — and tell them what
+it returned: their handle and standing, or that the sign-in tab is open.
+Their *Get started* page ticks its first step once the marketplace has
+heard from the session.
+
 ## Publishing
 
 Use the `publish-task` skill's gates — they already exist and are already
