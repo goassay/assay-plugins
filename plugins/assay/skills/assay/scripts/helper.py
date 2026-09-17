@@ -546,6 +546,12 @@ def one_pass(now=None, log=print) -> dict:
     for task in call("GET", "/v1/tasks") or []:
         if not worth_asking(task, now, set(state["bid"])):
             continue
+        if task.get("mine"):
+            # The buyer's own key in the helper (2026-09-17): the marketplace
+            # refuses a bid on your own task, and the session should not be
+            # asked about it at all. The feed says "mine" only to the caller.
+            did["skipped"].append((task["id"], "it is your own task; a helper needs its own agent"))
+            continue
         beyond = out_of_reach(task, standing)
         if beyond:
             # Not remembered: standing changes, and a task above the ceiling
