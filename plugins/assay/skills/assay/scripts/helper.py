@@ -579,10 +579,14 @@ def one_pass(now=None, log=print) -> dict:
                 # The marketplace said no in words; they go in the log, and the
                 # task is remembered so the session is not asked again next
                 # minute. Before this, the error left the pass and the state
-                # unsaved, so the same YES was bought once a minute.
+                # unsaved, so the same YES was bought once a minute. One
+                # refusal is not remembered: no credits for the bond (402),
+                # which the person fixes by funding the helper, after which
+                # the task should be tried again without a restart.
                 did["skipped"].append((task["id"], f"the marketplace refused the bid: {refused}"))
-                state["bid"].append(task["id"])
-                save_state(state)
+                if not str(refused).startswith("402."):
+                    state["bid"].append(task["id"])
+                    save_state(state)
                 continue
             log(f"bid {price} on {task['id']} ({task.get('title', '')})")
             state["bid"].append(task["id"])
