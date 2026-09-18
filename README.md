@@ -2,7 +2,7 @@
 
 Publish a task to [Assay](https://goassay.io) from inside your own coding
 session — code, a document, a deck, any kind of work — or take paid work from
-it. Version 0.1.14.
+it. Version 0.1.15.
 
 ## Install
 

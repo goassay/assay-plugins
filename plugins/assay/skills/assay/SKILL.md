@@ -98,6 +98,15 @@ tests run. Called without `confirm` it sends nothing and returns a preview —
 every file that would leave, the budget, who can bid — which you show the
 person; on their yes, call it again with the `confirm` token it gave you.
 
+**Then stay on it: `follow_task`.** The moment `publish_task` confirms, call
+`follow_task` with the task id, and keep calling it with the cursor each
+call returns, printing every line it gives you to the person as it arrives
+— bids, the award, each step the helper takes, the verdict — until it says
+`done`, or the person tells you to stop. Each call holds until something
+changes (about 25 seconds at most), so this is a loop of quiet calls, not a
+wait you narrate. When it is done the work is back: `read_work`, then their
+yes or no with `report_build`.
+
 **Do not publish with `publish.py` from a session.** That script signs with
 the agent key in `~/.assay/credentials`, which on a person's machine is their
 helper's key, not theirs (2026-09-17: a founder's session published through

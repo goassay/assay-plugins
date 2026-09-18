@@ -33,6 +33,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -281,6 +282,12 @@ def run_streaming(command, timeout: int, step_of) -> tuple:
             if step:
                 SESSION["steps"].append(step)
                 SESSION["log"]("  " + "  " * step[0] + step[1])
+                # E25: the buyer follows the work as it happens, so each step
+                # goes to the marketplace now, not in a batch at the end.
+                # Best effort, off this thread: a slow post must not hold up
+                # the reading of the next line.
+                if SESSION.get("award"):
+                    threading.Thread(target=post_steps_so_far, args=(SESSION["award"],), daemon=True).start()
             if time.monotonic() > deadline:
                 process.kill()
                 break
@@ -375,14 +382,37 @@ def codex_step(line: str):
 
 def post_steps(award_id: str, steps: list, log) -> None:
     """The session's steps, to the marketplace, beside the award (E23 Decision 6).
-    Best effort: a failure here is logged and does not fail the job."""
-    if not steps:
+    Best effort: a failure here is logged and does not fail the job. Since E25
+    the steps go up as they happen (post_steps_so_far); this sends whatever is
+    still unsent at the end, so nothing is lost if a live post failed."""
+    unsent = steps[SESSION.get("posted", 0):2000]
+    if not unsent:
         return
     try:
         call("POST", f"/v1/awards/{award_id}/steps",
-             {"steps": [{"depth": d, "line": l} for d, l in steps[:2000]]})
+             {"steps": [{"depth": d, "line": l} for d, l in unsent]})
+        SESSION["posted"] = SESSION.get("posted", 0) + len(unsent)
     except Exception as problem:  # noqa: BLE001 — the work is done; the log is extra
         log(f"could not send the steps: {problem}")
+
+
+POST_LOCK = threading.Lock()
+
+
+def post_steps_so_far(award_id: str) -> None:
+    """Every step not yet sent, sent now (E25). One at a time: two threads
+    posting the same steps would write them twice, and the server appends."""
+    with POST_LOCK:
+        steps = SESSION.get("steps") or []
+        unsent = steps[SESSION.get("posted", 0):2000]
+        if not unsent:
+            return
+        try:
+            call("POST", f"/v1/awards/{award_id}/steps",
+                 {"steps": [{"depth": d, "line": l} for d, l in unsent]}, timeout=10)
+            SESSION["posted"] = SESSION.get("posted", 0) + len(unsent)
+        except Exception:  # noqa: BLE001 — the end-of-job post sends what this could not
+            pass
 
 
 # The last session's bill, for the caller to record. A module dict rather
@@ -530,7 +560,10 @@ def one_pass(now=None, log=print) -> dict:
         state["attempts"][award["taskId"]] = state["attempts"].get(award["taskId"], 0) + 1
         save_state(state)
         SESSION["log"] = log
+        SESSION["award"] = award["awardId"]
+        SESSION["posted"] = 0
         report = ask_claude(work_prompt(award), timeout=3600)
+        SESSION["award"] = None
         record_cost(award["taskId"], "work", SESSION["usage"], log)
         post_steps(award["awardId"], SESSION.get("steps") or [], log)
         keep_transcript(award["taskId"], state["attempts"][award["taskId"]], report)
