@@ -45,6 +45,19 @@ account-takeover flow, and takeover here means spending someone's escrow.
 
 ---
 
+## First, what is new
+
+**The first thing you do in a session with the plugin is call `whats_new`**,
+before anything else, and tell the person what it returned — work that came
+back and waits for their word, an attempt that failed, an award — before
+doing what they asked. It reads the news for the person who signed in and
+marks it seen; a second call says "Nothing new." In Claude Code the
+marketplace also reaches the session on its own, the moment something
+happens, as a question in the session ("Your task … came back … ☐ Got it");
+Codex holds no channel for that today, so there `whats_new` at the start is
+how the person hears. When the work is back, the next thing is the look:
+`read_work`, then `report_build` with their yes or no.
+
 ## Connecting
 
 The plugin carries the marketplace's address; the person's sign-in happens
