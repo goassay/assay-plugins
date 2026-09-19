@@ -192,12 +192,28 @@ def worth_asking(task, now: datetime, already_bid: set) -> bool:
             and bidding_open(task, now))
 
 
+def work_key(award) -> str:
+    """What the state remembers a piece of work by. The award, since E27: a
+    revision is a second award on the same task, and remembering the task
+    would have hidden it. Older state holds task ids; both are honoured."""
+    return award.get("awardId") or award.get("taskId")
+
+
 def awards_needing_work(awards, submitted: set, attempts: dict = None) -> list:
     """Held, still active, not yet submitted, and not already tried ATTEMPTS_PER_AWARD times."""
     attempts = attempts or {}
     return [a for a in awards or []
-            if a.get("status") == "ACTIVE" and a.get("taskId") not in submitted
-            and attempts.get(a.get("taskId"), 0) < ATTEMPTS_PER_AWARD]
+            if a.get("status") == "ACTIVE"
+            and work_key(a) not in submitted
+            and (a.get("revisionReason") or a.get("taskId") not in submitted)
+            and attempts.get(work_key(a), 0) < ATTEMPTS_PER_AWARD]
+
+
+def rejections_to_answer(awards, replied: set) -> list:
+    """E27 Rule 3: awards the buyer rejected with a reason, whose reply window is
+    open and which this helper has not answered."""
+    return [a for a in awards or []
+            if a.get("rejectionReason") and a.get("awardId") not in replied]
 
 
 # ── state: what this helper already did, so a pass is idempotent ────────────
@@ -528,9 +544,33 @@ def decide_prompt(task, spec: str, public_suite: str, runnable: bool = True) -> 
             + judged)
 
 
+def reply_prompt(award) -> str:
+    """The helper's one reply to a rejection (E27 Rule 3): plain, for the judge."""
+    return (PROMPT.read_text() + "\n\n"
+            f"THIS PASS: reply only; do no work and change no files. The buyer rejected the work you "
+            f"submitted on task {award['taskId']} ({award.get('title', '')}) with this reason:\n\n"
+            + as_untrusted("THE BUYER'S REASON", award["rejectionReason"]) + "\n\n"
+            f"Your earlier work is under {WORK}/{award['taskId']}/package if it is still here; read it if "
+            "you need to. Write a reply of one paragraph at most, addressed to a judge who will read the "
+            "spec, your work and this reason: say plainly what the work does that meets the spec, or "
+            "what the reason misses, or, if the reason is right, say so. No promises, no offers to "
+            "redo it. Output the reply and nothing else.")
+
+
 def work_prompt(award) -> str:
     task_id = award["taskId"]
     work = WORK_COMMAND
+    if award.get("revisionReason"):
+        return (PROMPT.read_text() + "\n\n"
+                f"THIS PASS: a revision. The buyer looked at the work you submitted on task {task_id} "
+                f"and asked for one change, with this reason:\n\n"
+                + as_untrusted("THE BUYER'S REASON", award["revisionReason"]) + "\n\n"
+                f"You hold award {award['awardId']} (lease runs to {award.get('leaseExpiresAt', '?')}). "
+                f"Your earlier work is under {WORK}/{task_id}/package; do NOT run `{work} fetch` on it "
+                "(that lays the original package down again over your changes). If that directory is "
+                f"gone, fetch and do the whole job again. Revise the work there to answer the reason, "
+                f"then `{work} check {task_id}` and, when it passes, `{work} submit {task_id}`.\n"
+                "End with one line: SUBMITTED, or STOPPED and why.")
     return (PROMPT.read_text() + "\n\n"
             f"THIS PASS: you hold award {award['awardId']} on task {task_id} "
             f"(lease runs to {award.get('leaseExpiresAt', '?')}). Use the skill's plumbing, not "
@@ -555,9 +595,28 @@ def one_pass(now=None, log=print) -> dict:
 
     # Awards first: a lease is running down.
     state.setdefault("attempts", {})
-    for award in awards_needing_work(call("GET", "/v1/awards/mine"), set(state["submitted"]), state["attempts"]):
-        log(f"award held on {award['taskId']} ({award.get('title', '')}) — starting the session")
-        state["attempts"][award["taskId"]] = state["attempts"].get(award["taskId"], 0) + 1
+    mine = call("GET", "/v1/awards/mine")
+    # E27: a rejection with a reason gets one reply from a short session, so the
+    # judge hears both sides. Before the work: the window is ten minutes.
+    state.setdefault("replied", [])
+    for award in rejections_to_answer(mine, set(state["replied"])):
+        log(f"the buyer rejected {award['taskId']}: {award['rejectionReason']} — writing the reply")
+        state["replied"].append(award["awardId"])
+        save_state(state)
+        answer = ask_claude(reply_prompt(award), timeout=300)
+        record_cost(award["taskId"], "reply", SESSION["usage"], log)
+        text = (answer or "").strip()
+        if text:
+            try:
+                call("POST", f"/v1/awards/{award['awardId']}/reply", {"reply": text[:4000]})
+                log(f"replied on {award['taskId']}")
+            except AssayError as problem:
+                log(f"could not send the reply: {problem}")
+    for award in awards_needing_work(mine, set(state["submitted"]), state["attempts"]):
+        revising = bool(award.get("revisionReason"))
+        log(f"award held on {award['taskId']} ({award.get('title', '')}) — "
+            + ("a revision: " + award["revisionReason"] if revising else "starting the session"))
+        state["attempts"][work_key(award)] = state["attempts"].get(work_key(award), 0) + 1
         save_state(state)
         SESSION["log"] = log
         SESSION["award"] = award["awardId"]
@@ -566,10 +625,10 @@ def one_pass(now=None, log=print) -> dict:
         SESSION["award"] = None
         record_cost(award["taskId"], "work", SESSION["usage"], log)
         post_steps(award["awardId"], SESSION.get("steps") or [], log)
-        keep_transcript(award["taskId"], state["attempts"][award["taskId"]], report)
+        keep_transcript(award["taskId"], state["attempts"][work_key(award)], report)
         log(report.strip().splitlines()[-1] if report.strip() else "(no report)")
         if "SUBMITTED" in report:
-            state["submitted"].append(award["taskId"])
+            state["submitted"].append(work_key(award))
             did["submitted"].append(award["taskId"])
         save_state(state)
 
