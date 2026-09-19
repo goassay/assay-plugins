@@ -259,6 +259,13 @@ def submit(task_id):
     # while it is still the user's reputation on the line rather than ours.
     refuse_out_of_scope(patch, scopes)
 
+    # The check, here, not left to the session (2026-09-19: a session ran its
+    # own one-liner instead of `work check` and submitted; the verifier
+    # happened to pass it). A package with a runner is checked before it
+    # leaves; one with nothing to run is the buyer's to judge.
+    if (tree / "run.sh").exists() and check(task_id) != 0:
+        raise AssayError("The public tests do not pass; nothing was submitted. Fix and submit again.")
+
     award = held_award(task_id)
     call("POST", f"/v1/awards/{award['awardId']}/submissions",
          {"patch": patch, "notes": "submitted from the assay skill"})

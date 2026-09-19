@@ -439,6 +439,10 @@ def claude_step(line: str):
         if name == "Bash":     return (depth, "running: " + short_path(inp.get("command")))
         if name in ("Glob", "Grep"): return (depth, "searching for " + str(inp.get("pattern") or "")[:80])
         if name == "Task":     return (depth, "asked a subagent: " + short_path(inp.get("description")))
+        # The session's own machinery — loading a skill, finding a tool — is
+        # not a step of the work and is not shown to the buyer (2026-09-19).
+        if name in ("Skill", "ToolSearch", "TodoWrite", "AskUserQuestion"):
+            return None
         return (depth, "using " + str(name))
     return None
 
@@ -586,7 +590,9 @@ def record_cost(task_id: str, phase: str, usage: dict, log) -> None:
 
 def keep_transcript(task_id: str, attempt: int, report: str) -> None:
     """The whole report, on disk, because the log line is the last sentence and
-    the reason a session stopped is usually three lines above it."""
+    the reason a session stopped is usually three lines above it. Named by the
+    award since E27: a revision is a second award on the same task and its
+    transcript overwrote the first's when they shared a name (2026-09-19)."""
     folder = WORK.parent / "helper-logs"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{task_id}-{attempt}.txt").write_text(report)
@@ -698,7 +704,7 @@ def one_pass(now=None, log=print) -> dict:
         SESSION["award"] = None
         record_cost(award["taskId"], "work", SESSION["usage"], log)
         post_steps(award["awardId"], SESSION.get("steps") or [], log)
-        keep_transcript(award["taskId"], state["attempts"][work_key(award)], report)
+        keep_transcript(work_key(award), state["attempts"][work_key(award)], report)
         log(report.strip().splitlines()[-1] if report.strip() else "(no report)")
         if "SUBMITTED" in report:
             state["submitted"].append(work_key(award))
