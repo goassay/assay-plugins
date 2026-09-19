@@ -141,6 +141,16 @@ python3 <this skill's folder>/scripts/publish.py <package-dir> --scope src \
     --budget 8000 --reserve 6000
 ```
 
+**Who does it is the person's to say (E26).** Before the preview, call
+`catalogue` and ask: *any helper, or one that runs Claude Code or Codex —
+and which model?* The catalogue lists every model helpers report, verbatim,
+with how many helpers listening now can run each, and the classes best /
+default / fast per tool resolved to names. Pass the answer as
+`allowedModels`: omit for any; `["codex"]` for the tool; `["codex/gpt-5.5"]`
+or a class's names for the model. The preview says how many helpers can
+take it. A helper declares what it runs and nothing verifies the claim; say
+"declared" when you say it.
+
 **The budget decides who can bid.** A new helper may take a task worth up to
 10,000 credits (the marketplace's gate, E4); above that only established
 helpers can bid, and the preview — `publish_task` without `confirm`, or

@@ -73,10 +73,81 @@ def session_runner() -> str:
     return "claude"
 
 
-def model_declared() -> str:
-    """What the bid says it runs on. A claim nobody verifies, so it is at least
-    honest about which product is behind it."""
+def tool_name() -> str:
+    """The tool's name on the marketplace (E26): claude-code or codex."""
     return "codex" if session_runner() == "codex" else "claude-code"
+
+
+# The model the last session said it ran, from its own stream (E26): the
+# honest reading, once there has been one.
+SEEN_MODEL: dict = {"model": None}
+
+
+def configured_model() -> str:
+    """The model the tool is set to, where it keeps it: Codex's config.toml
+    `model`, Claude Code's settings.json `model`; the vendor's default word
+    when neither says. Declared, never verified."""
+    if SEEN_MODEL.get("model"):
+        return SEEN_MODEL["model"]
+    try:
+        if session_runner() == "codex":
+            text = (pathlib.Path.home() / ".codex" / "config.toml").read_text()
+            m = re.search(r'(?m)^\s*model\s*=\s*"([^"]+)"', text)
+            return m.group(1) if m else "default"
+        settings = json.loads((pathlib.Path.home() / ".claude" / "settings.json").read_text())
+        model = settings.get("model")
+        return str(model) if model else "default"
+    except Exception:  # noqa: BLE001 — a missing file is "default"
+        return "default"
+
+
+def model_declared() -> str:
+    """What the bid says it runs on: tool/model (E26). A claim nobody verifies,
+    so it is at least honest about the product and what it is set to."""
+    return f"{tool_name()}/{configured_model()}"
+
+
+def models_offered() -> list:
+    """Every model the tool offers, verbatim (E26 Decision 2): Codex keeps the
+    list its account is allowed at ~/.codex/models_cache.json; Claude Code's
+    are its families. Nothing curated; the marketplace shows the counts."""
+    if session_runner() == "codex":
+        try:
+            d = json.loads((pathlib.Path.home() / ".codex" / "models_cache.json").read_text())
+            models = d.get("models") if isinstance(d, dict) else d
+            names = [(m.get("slug") or m.get("id")) if isinstance(m, dict) else str(m) for m in (models or [])]
+            return [n for n in names if n]
+        except Exception:  # noqa: BLE001
+            return []
+    return ["claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-haiku-4-5-20251001"]
+
+
+def report_models(log=print) -> None:
+    """Tell the marketplace what this helper can run, once a start (E26)."""
+    models = models_offered()
+    configured = configured_model()
+    if configured != "default" and configured not in models:
+        models = [configured] + models
+    try:
+        call("POST", "/v1/agents/me/models", {"tool": tool_name(), "models": models})
+        log(f"runs {tool_name()} as {configured}; {len(models)} models on offer")
+    except AssayError as problem:
+        log(f"could not report the models: {problem}")
+
+
+def meant_for_me(task) -> str:
+    """Why this task is not for this helper (E26), or "" when it may bid: the
+    task names who may, as prefixes of tool/model, and this helper's
+    declaration is not among them. Read before the session is asked, so a
+    refusal at the bid never costs a decision."""
+    allowed = task.get("allowedModels") or []
+    if not allowed:
+        return ""
+    mine = model_declared()
+    for a in allowed:
+        if mine == a or mine.startswith(a + "/") or mine.startswith(a + "-") or mine.startswith(a + "."):
+            return ""
+    return f"it asks for {', '.join(allowed)}; this helper runs {mine}"
 
 
 # How many headless sessions an award gets before the loop leaves it alone.
@@ -353,6 +424,8 @@ def claude_step(line: str):
         d = json.loads(line)
     except (json.JSONDecodeError, ValueError):
         return None
+    if d.get("type") == "assistant" and (d.get("message") or {}).get("model"):
+        SEEN_MODEL["model"] = str(d["message"]["model"])
     if d.get("type") != "assistant":
         return None
     depth = 1 if d.get("parent_tool_use_id") else 0
@@ -644,6 +717,10 @@ def one_pass(now=None, log=print) -> dict:
             # asked about it at all. The feed says "mine" only to the caller.
             did["skipped"].append((task["id"], "it is your own task; a helper needs its own agent"))
             continue
+        not_mine = meant_for_me(task)
+        if not_mine:
+            did["skipped"].append((task["id"], not_mine))
+            continue
         beyond = out_of_reach(task, standing)
         if beyond:
             # Not remembered: standing changes, and a task above the ceiling
@@ -742,6 +819,7 @@ def main(argv) -> int:
     missing = toolchain_ready()
     if missing:
         print("this machine lacks: " + ", ".join(missing), file=sys.stderr, flush=True)
+    report_models(lambda line: print(line, flush=True))
     while True:
         # The stamp is taken per line, not per pass: with one stamp a pass
         # long, every step of a two-minute session printed with the same time
