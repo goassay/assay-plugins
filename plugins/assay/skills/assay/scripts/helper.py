@@ -256,10 +256,20 @@ def out_of_reach(task, standing) -> str:
     return ""
 
 
+def round_key(task) -> str:
+    """What the state remembers a task by: the task and its attempt. A task
+    sent back to the board (a rejection that stood, a failed try) is a new
+    round with a new attempt number; remembering the task alone made the
+    helper skip it forever as "already bid on" (production, 2026-09-19).
+    Older state holds bare task ids; those still match round 0."""
+    attempt = task.get("attemptN") or 0
+    return f"{task.get('id')}#{attempt}" if attempt else str(task.get("id"))
+
+
 def worth_asking(task, now: datetime, already_bid: set) -> bool:
-    """Open, still accepting bids, not already bid on by this helper."""
+    """Open, still accepting bids, not already bid on by this helper in this round."""
     return (task.get("status") == "OPEN"
-            and task.get("id") not in already_bid
+            and round_key(task) not in already_bid
             and bidding_open(task, now))
 
 
@@ -764,11 +774,11 @@ def one_pass(now=None, log=print) -> dict:
                     save_state(state)
                 continue
             log(f"bid {price} on {task['id']} ({task.get('title', '')})")
-            state["bid"].append(task["id"])
+            state["bid"].append(round_key(task))
             did["bid"].append(task["id"])
         else:
             did["skipped"].append((task["id"], "the session said no"))
-            state["bid"].append(task["id"])   # asked once; do not ask every minute
+            state["bid"].append(round_key(task))   # asked once; do not ask every minute
         save_state(state)
 
     for task_id, why in did["skipped"]:
