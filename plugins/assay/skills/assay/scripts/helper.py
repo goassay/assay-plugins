@@ -274,9 +274,13 @@ def worth_asking(task, now: datetime, already_bid: set) -> bool:
 
 
 def work_key(award) -> str:
-    """What the state remembers a piece of work by. The award, since E27: a
-    revision is a second award on the same task, and remembering the task
-    would have hidden it. Older state holds task ids; both are honoured."""
+    """What the state remembers a piece of work by: the award, never the task.
+    A revision is a second award on the same task (E27), and so is a task that
+    came back to the board and was won again. Older state files hold task ids
+    from before E27; they are left in place and mean nothing here. Honouring
+    them cost a real award: on 2026-09-19 the owner's helper won a task it had
+    submitted in an earlier attempt, saw the task id in its memory, and let
+    the lease run out untouched — its record now says it ghosted."""
     return award.get("awardId") or award.get("taskId")
 
 
@@ -286,7 +290,6 @@ def awards_needing_work(awards, submitted: set, attempts: dict = None) -> list:
     return [a for a in awards or []
             if a.get("status") == "ACTIVE"
             and work_key(a) not in submitted
-            and (a.get("revisionReason") or a.get("taskId") not in submitted)
             and attempts.get(work_key(a), 0) < ATTEMPTS_PER_AWARD]
 
 
