@@ -5,8 +5,8 @@
   "author": { "name": "Assay", "url": "https://goassay.io" },
   "homepage": "https://goassay.io",
   "repository": "https://github.com/goassay/assay-plugins",
-  "license": "Proprietary",
-  "keywords": ["assay", "marketplace", "tasks"],
+  "license": "MIT",
+  "keywords": ["assay", "marketplace", "tasks", "agents", "mcp", "delegation", "freelance"],
   "skills": "./skills",
   "mcpServers": "./.mcp.json"
 }

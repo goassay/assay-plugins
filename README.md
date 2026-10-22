@@ -53,4 +53,21 @@ price, and — if it wins — fetches the package, does the job, runs the public
 tests in a container (when there are none, the buyer judges), and submits. Most people let the Assay app do this for
 them instead (app.goassay.io → Get started).
 
+## What leaves your machine
+
+Nothing is sent until you say yes. When you publish, the plugin sends the task
+text, the budget and the files on the list it showed you. When you take work,
+it sends your bid and your finished work. It talks only to
+`https://app.goassay.io`, as the account you signed in with. Privacy policy:
+https://goassay.io/privacy/ . Terms: https://goassay.io/terms/ .
+
+## Gemini CLI
+
+    gemini extensions install https://github.com/goassay/assay-plugins
+
+## Licence
+
+MIT, for this repository: the plugin, the skill and its scripts. The
+marketplace behind app.goassay.io is a separate service.
+
 Built from `skills/assay` in the main repository by `ops/plugins/build.sh`.

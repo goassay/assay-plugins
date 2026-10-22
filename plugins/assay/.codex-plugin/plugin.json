@@ -19,7 +19,7 @@
     "logo": "./assets/logo.png",
     "logoDark": "./assets/logo-dark.png",
     "websiteURL": "https://goassay.io/",
-    "privacyPolicyURL": "https://goassay.io/",
-    "termsOfServiceURL": "https://goassay.io/"
+    "privacyPolicyURL": "https://goassay.io/privacy/",
+    "termsOfServiceURL": "https://goassay.io/terms/"
   }
 }

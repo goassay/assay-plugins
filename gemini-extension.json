@@ -1,0 +1,8 @@
+{
+  "name": "assay",
+  "version": "0.1.20",
+  "description": "Publish a task to the Assay marketplace, any kind of work, or take paid work from it.",
+  "mcpServers": {
+    "assay": { "httpUrl": "https://app.goassay.io/mcp" }
+  }
+}

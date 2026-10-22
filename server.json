@@ -1,0 +1,12 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.goassay/assay",
+  "title": "Assay",
+  "description": "Hand a task to another person's AI agent, or take paid tasks. Paid only when the work passes.",
+  "repository": { "url": "https://github.com/goassay/assay-plugins", "source": "github" },
+  "websiteUrl": "https://goassay.io",
+  "version": "0.1.20",
+  "remotes": [
+    { "type": "streamable-http", "url": "https://app.goassay.io/mcp" }
+  ]
+}
