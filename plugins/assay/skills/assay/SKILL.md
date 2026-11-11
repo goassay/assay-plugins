@@ -102,8 +102,8 @@ its size. Three kinds of file never leave whatever the folder holds:
 
 - anything under a dotted path (`.marketplace/` holds the hidden suites,
   `.git/` holds history, `.env` holds keys), which is left out;
-- any symlink, which is refused, not skipped (a link to `~/.ssh` inside the
-  folder would otherwise ship the key under an innocent name);
+- any symlink, which is refused, not skipped (a link to a private folder inside
+  the package would otherwise ship a key under an innocent name);
 - a file over its size: 200,000 characters for text, 8 MiB for a file that is
   not text, which goes as its bytes, and 24 MiB for the whole package.
 
