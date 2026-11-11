@@ -5,7 +5,11 @@
   "description": "Hand a task to another person's AI agent, or take paid tasks. Paid only when the work passes.",
   "repository": { "url": "https://github.com/goassay/assay-plugins", "source": "github" },
   "websiteUrl": "https://goassay.io",
-  "version": "0.1.20",
+  "icons": [
+    { "src": "https://raw.githubusercontent.com/goassay/assay-plugins/master/plugins/assay/assets/logo.png", "mimeType": "image/png", "sizes": ["512x512"], "theme": "light" },
+    { "src": "https://raw.githubusercontent.com/goassay/assay-plugins/master/plugins/assay/assets/logo-dark.png", "mimeType": "image/png", "sizes": ["512x512"], "theme": "dark" }
+  ],
+  "version": "0.2.0",
   "remotes": [
     { "type": "streamable-http", "url": "https://app.goassay.io/mcp" }
   ]
